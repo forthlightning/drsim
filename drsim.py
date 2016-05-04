@@ -6,6 +6,8 @@ import numpy as np
 from matplotlib import pyplot as plt
 import time
 
+r.seed(12345)
+
 WASHER = {'name':'Washer','power':1000, 'DR':1, 'lowbound':6, 'highbound':10, 'noevents':1, 'duration':1}
 DRYER = {'name':'Dryer','power':500, 'DR':1, 'lowbound':6, 'highbound':17, 'noevents':3, 'duration':2}
 APPLIANCES = {'Washer':WASHER, 'Dryer':DRYER}
@@ -156,10 +158,13 @@ def main(num_sims, inter_frame_delay):
 	plt.ion()
 	# make figure
 	fig = plt.figure()
-
 	ax = fig.add_subplot(1, 1, 1)
-	kWh_trace, = ax.plot(x,Appliance.kWh_per_hour,'k-') #comma unpacks tuples
-	DR_schedule, = ax.plot(x, Appliance.curtailed, 'k--')
+
+
+
+
+	# kWh_trace = ax.bar(x,Appliance.kWh_per_hour,1) #comma unpacks tuples
+	# DR_schedule = ax.bar(x, Appliance.curtailed,1)
 
 	# visualize DR range
 	plt.plot((16, 16), (0, 1500), 'r--')
@@ -172,9 +177,22 @@ def main(num_sims, inter_frame_delay):
 
 	# ask for some number of trials, plot each one
 	for DR, kWh, DR_sched in do_simulation(num_sims, Appliance):
+		power_usage = ax.bar(x, kWh, 1)
+		curtailed_schedule = ax.bar(x, DR_sched, 1)
 		# assign new kWh data to axis
-		kWh_trace.set_ydata(kWh)
-		DR_schedule.set_ydata(DR_sched)
+		print kWh
+		print DR_sched
+		for i in range(len(kWh)):
+			power_usage[i].set_height(kWh[i])
+			curtailed_schedule[i].set_height(DR_sched[i])
+			if kWh[i] != 0:
+				power_usage[i].set_color('b')
+			elif DR_sched[i] != 0:
+				curtailed_schedule[i].set_color('r')
+			else:
+				pass		
+
+
 		plt.title("Appliance Usage, DR: %s"% (DR_tot))
 		fig.canvas.draw()
 		# wait for readability
@@ -182,10 +200,13 @@ def main(num_sims, inter_frame_delay):
 		DR_tot += DR
 		print ""
 		print "DR Power: ", DR
+		for i in range(len(kWh)):
+			power_usage[i].set_height(0)
+			curtailed_schedule[i].set_height(0)	
 
 
 if __name__ == '__main__':
-	main(5, 1)
+	main(7, .1)
 
 
 
