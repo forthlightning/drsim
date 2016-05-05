@@ -9,14 +9,12 @@ import time
 r.seed(12345)
 
 WASHER = {'name':'Washer','power':1000, 'DR':1, 'lowbound':6, 'highbound':10, 'noevents':1, 'duration':1}
-DRYER = {'name':'Dryer','power':500, 'DR':1, 'lowbound':6, 'highbound':17, 'noevents':3, 'duration':2}
-APPLIANCES = {'Washer':WASHER, 'Dryer':DRYER}
-
+DRYER = {'name':'Dryer','power':500, 'DR':1, 'lowbound':6, 'highbound':17, 'noevents':2, 'duration':2}
+HEATER = {'name':'Heater','power':100, 'DR':1, 'lowbound':0, 'highbound':20, 'noevents':7, 'duration':2}
+APPLIANCES = {'Washer':WASHER, 'Dryer':DRYER, 'Heater':HEATER}
+TOU = [15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 22, 22, 34, 34, 34, 34, 34, 34, 22, 22, 15, 15, 15] 
 class HomeEnergyAutomationDevice:
 	def __init__(self, APPLIANCES, env, store):
-		# receive array of dictionaries APPLIANCES
-		# schedule event one for each instance of each appliance
-		# schedule DR event
 		self.name = "HEAD"
 		self.env = env
 		self.app_dict = APPLIANCES
@@ -27,10 +25,10 @@ class HomeEnergyAutomationDevice:
 
 			# add string of appliance name to filterstore
 			store.put(self.app_dict[i]['name'])
+
 		dr_window = (16,19)
 		self.DR = env.process(self.demand_response(APPLIANCES, dr_window, store, env))
 
-		#DR = env.process(self.demand_response(env))
 
 	def demand_response(self, APPLIANCES, dr_window, store, env):
 		yield env.timeout(dr_window[0])
@@ -59,6 +57,7 @@ class Appliance:
 		self.duration = appliance_info['duration']
 		self.lowbound = appliance_info['lowbound']
 		self.highbound = appliance_info['highbound']
+		self.on_off = 0
 
 		inter = np.linspace(self.lowbound, self.highbound, self.noevents+1)
 		intervals = []
@@ -85,13 +84,12 @@ class Appliance:
 		for i in self.start_times:
 			gap = i - end_time
 			try:
-				# wait for time between now and next scheduled event
+				# if gap is < 1, proceed without waiting
 				if gap <= 0:
 					yield env.timeout(0)
+				# if not, wait an appropriate amount of time
 				else:
 					yield env.timeout(gap)
-				#print "Store has: ", store.items
-				#print "I am %s" % self.name
 
 				# pull appliance from store, start using power
 				yield store.get(lambda x: x == self.name)
@@ -99,6 +97,7 @@ class Appliance:
 				duration = self.duration
 				print('%10s %7s %5s %i' % ("STARTED:",self.name,"AT: ", env.now))
 				while duration > 0:
+					self.on_off = 1
 					Appliance.kWh_per_hour[env.now] += self.power
 					yield env.timeout(1)
 					duration -= 1
@@ -106,10 +105,12 @@ class Appliance:
 				yield store.put(self.name)
 				print "%10s %7s %5s %i" % ("FINISHED:",self.name, "AT: ", env.now)
 				end_time = env.now
+				self.on_off = 0
 
 			except simpy.Interrupt as i:
 				Appliance.DR_power += self.power
 				Appliance.curtailed[env.now] += self.power
+				store.put(self.name)
 				print "%10s %7s %5s %i" % ("DRed:",self.name, "AT: ", env.now)
 				# TODO reschedule DRed event
 				
@@ -138,7 +139,7 @@ def do_simulation(num, Appliance):
 		# run simulation for 1 day
 		env.run(until=24)
 
-		# assign dr power and power schedule, wait for next iteration
+		# return DR_power for run i, as well as scheduled demand and curtailed demand
 		yield Appliance.DR_power, Appliance.kWh_per_hour, Appliance.curtailed
 
 		# reset for next round
@@ -152,61 +153,111 @@ def main(num_sims, inter_frame_delay):
 	# make index
 	x = range(24)
 	# TODO make timesteps finer
-	DR_tot = 0
+
 
 	# make plots non-blocking
 	plt.ion()
+
 	# make figure
 	fig = plt.figure()
-	ax = fig.add_subplot(1, 1, 1)
 
-
-
-
-	# kWh_trace = ax.bar(x,Appliance.kWh_per_hour,1) #comma unpacks tuples
-	# DR_schedule = ax.bar(x, Appliance.curtailed,1)
+	# first graph
+	ax = fig.add_subplot(3, 1, 1)
 
 	# visualize DR range
 	plt.plot((16, 16), (0, 1500), 'r--')
 	plt.plot((19, 19), (0, 1500), 'r--')
 
-	plt.title("Appliance Usage, DR: %s"% (DR_tot))
+	# dynamic title
+	plt.title("Appliance Usage")
+
+	# live update graph
+	x2 = range(num_sims)
+
+	cum_energy_series = [0] * num_sims
+	ax2 = fig.add_subplot(3, 1, 2)
+	cum_energy_trace, = ax2.plot(x2,cum_energy_series)
+	cum_energy_money = 0
+
+	DR_series = [0] * num_sims
+	ax3 = fig.add_subplot(3, 1, 3)
+	DR_trace, = ax3.plot(x2, DR_series)
+	DR_money_tot = 0
+
 	plt.show()
+
+
 	# pause for stability
 	time.sleep(1)
 
+	trial = 0
+
 	# ask for some number of trials, plot each one
-	for DR, kWh, DR_sched in do_simulation(num_sims, Appliance):
-		power_usage = ax.bar(x, kWh, 1)
+	for DR_watts, watt_schedule, DR_sched in do_simulation(num_sims, Appliance):
+
+		# generate two sets of bars, one for demand, one for curtailed demand
+		power_usage = ax.bar(x, watt_schedule, 1)
 		curtailed_schedule = ax.bar(x, DR_sched, 1)
-		# assign new kWh data to axis
-		print kWh
-		print DR_sched
-		for i in range(len(kWh)):
-			power_usage[i].set_height(kWh[i])
+
+		# cycle through each timestep
+		for i in range(len(watt_schedule)):
+			# update bar lengths
+			power_usage[i].set_height(watt_schedule[i])
 			curtailed_schedule[i].set_height(DR_sched[i])
-			if kWh[i] != 0:
+			# power gets plotted in blue, DR gets plotted in red
+			if watt_schedule[i] != 0:
 				power_usage[i].set_color('b')
 			elif DR_sched[i] != 0:
 				curtailed_schedule[i].set_color('r')
 			else:
 				pass		
 
-
-		plt.title("Appliance Usage, DR: %s"% (DR_tot))
-		fig.canvas.draw()
-		# wait for readability
+		# pause for trippy visuals
 		time.sleep(inter_frame_delay)
-		DR_tot += DR
+
+		energy_money = 0
+		for hourly, price in zip(watt_schedule, TOU):
+			# .001 is kwh per watt hour
+			energy_money += hourly * (.001) * price
+
+		cum_energy_money += energy_money/100
+		cum_energy_series[trial] = cum_energy_money
+		cum_energy_trace.set_xdata(x[:len(cum_energy_series)])
+		cum_energy_trace.set_ydata(cum_energy_series)
+		ax2.set_ylim([0,max(cum_energy_series)])
+
+		DR_money = 0
+		for curtail, price in zip(DR_sched, TOU):
+			DR_money += curtail * price * .001
+			print DR_money
+
+		DR_money_tot += DR_money/100
+		print DR_money_tot
+		DR_series[trial] = DR_money_tot
+		DR_trace.set_xdata(x[:len(DR_series)])
+		print DR_series
+		DR_trace.set_ydata(DR_series)
+		ax3.set_ylim([0,DR_money_tot])
+
+		trial += 1
+
+		# re-draw figure
+		fig.canvas.draw()
+
+		# reset graph for next run
 		print ""
-		print "DR Power: ", DR
-		for i in range(len(kWh)):
+		print "DR Power: ", DR_watts
+		for i in range(len(watt_schedule)):
 			power_usage[i].set_height(0)
 			curtailed_schedule[i].set_height(0)	
 
 
+		
+		print "energy money", energy_money/100
+
+
 if __name__ == '__main__':
-	main(7, .1)
+	main(10, .5)
 
 
 
