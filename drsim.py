@@ -143,7 +143,6 @@ def simulate_day(num, Appliance):
 
 	'''
 	this is a generator that "holds" num number of trials of a single day of simulation
-
 	inputs:
 		num - count of simulations to do
 		Appliance - class Appliance, acts as storage for cumulative values for each day/simulation
@@ -306,11 +305,3 @@ def main(num_sims, inter_frame_delay):
 
 if __name__ == '__main__':
 	main(30, .05)
-
-
-
-
-
-
-
-
