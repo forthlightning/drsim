@@ -6,6 +6,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 import time
 
+
 r.seed(12345)
 
 WASHER = {'name':'Washer','power':1000, 'DR':1, 'lowbound':6, 'highbound':10, 'noevents':1, 'duration':1}
